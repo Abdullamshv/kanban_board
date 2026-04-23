@@ -29,7 +29,8 @@ class _KanbanScreenState extends ConsumerState<KanbanScreen> {
         final parentIndicator = tasks
             .where((t) => t.indicatorToMoId == task.parentId)
             .firstOrNull;
-        folders[task.parentId] = parentIndicator?.name ??
+        folders[task.parentId] =
+            parentIndicator?.name ??
             (task.parentName.isNotEmpty
                 ? task.parentName
                 : 'Folder ${task.parentId}');
@@ -41,7 +42,13 @@ class _KanbanScreenState extends ConsumerState<KanbanScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(boardProvider);
-
+    ref.listen(boardProvider, (prev, next) {
+      if (next is BoardError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next.message), backgroundColor: Colors.red),
+        );
+      }
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -50,13 +57,21 @@ class _KanbanScreenState extends ConsumerState<KanbanScreen> {
         ),
         elevation: 0,
       ),
-      body: switch (state) {
-        BoardLoading() => const Center(
-            child: CircularProgressIndicator(color: Colors.white),
+      body: Column(
+        children: [
+          if (state is BoardData && state.isSaving)
+            const LinearProgressIndicator(),
+          Expanded(
+            child: switch (state) {
+              BoardLoading() => const Center(
+                child: CircularProgressIndicator(),
+              ),
+              BoardError(:final message) => _buildError(message),
+              BoardData(:final tasks) => _buildBoard(tasks),
+            },
           ),
-        BoardError(:final message) => _buildError(message),
-        BoardData(:final tasks) => _buildBoard(tasks),
-      },
+        ],
+      ),
     );
   }
 
@@ -67,7 +82,10 @@ class _KanbanScreenState extends ConsumerState<KanbanScreen> {
         children: [
           const Icon(Icons.error_outline, color: Colors.white, size: 48),
           const SizedBox(height: 16),
-          Text(error, style: const TextStyle(fontSize: 16, color: Colors.white)),
+          Text(
+            error,
+            style: const TextStyle(fontSize: 16, color: Colors.white),
+          ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: () => ref.read(boardProvider.notifier).retry(),
@@ -98,29 +116,35 @@ class _KanbanScreenState extends ConsumerState<KanbanScreen> {
         .where((t) => !folderIds.contains(t.indicatorToMoId))
         .toList();
 
-    return Scrollbar(
-      controller: _scrollController,
-      thumbVisibility: true,
-      child: ScrollConfiguration(
-        behavior: _KanbanScrollBehavior(),
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.all(8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: orderedFolderIds.map((folderId) {
-              final folderName = folders[folderId] ?? 'Unknown';
-              final columnCards =
-                  cards.where((c) => c.parentId == folderId).toList();
+    return RefreshIndicator(
+      onRefresh: () async {
+        ref.read(boardProvider.notifier).retry();
+      },
+      child: Scrollbar(
+        controller: _scrollController,
+        thumbVisibility: true,
+        child: ScrollConfiguration(
+          behavior: _KanbanScrollBehavior(),
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: orderedFolderIds.map((folderId) {
+                final folderName = folders[folderId] ?? 'Unknown';
+                final columnCards = cards
+                    .where((c) => c.parentId == folderId)
+                    .toList();
 
-              return KanbanColumn(
-                key: ValueKey(folderId),
-                folderId: folderId,
-                folderName: folderName,
-                tasks: columnCards,
-              );
-            }).toList(),
+                return KanbanColumn(
+                  key: ValueKey(folderId),
+                  folderId: folderId,
+                  folderName: folderName,
+                  tasks: columnCards,
+                );
+              }).toList(),
+            ),
           ),
         ),
       ),
@@ -131,9 +155,9 @@ class _KanbanScreenState extends ConsumerState<KanbanScreen> {
 class _KanbanScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {
-        PointerDeviceKind.touch,
-        PointerDeviceKind.mouse,
-        PointerDeviceKind.stylus,
-        PointerDeviceKind.trackpad,
-      };
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+  };
 }

@@ -17,7 +17,8 @@ class KanbanRepository {
         'requested_mo_id': '42',
         'behaviour_key': 'task,kpi_task',
         'with_result': 'false',
-        'response_fields': 'name,indicator_to_mo_id,parent_id,parent_name,order',
+        'response_fields':
+            'name,indicator_to_mo_id,parent_id,parent_name,order',
         'auth_user_id': '40',
       });
 
@@ -55,8 +56,8 @@ class KanbanRepository {
   }) async {
     try {
       final formData = FormData.fromMap({
-        'period_start': '2026-04-01', 
-        'period_end': '2026-04-30',  
+        'period_start': '2026-04-01',
+        'period_end': '2026-04-30',
         'period_key': 'month',
         'indicator_to_mo_id': taskId.toString(),
         'field_name': fieldName,
@@ -70,18 +71,25 @@ class KanbanRepository {
       );
 
       final responseData = response.data;
-      debugPrint('UPDATE RESPONSE [$fieldName=$fieldValue]: $responseData'); 
-      
+      debugPrint('UPDATE RESPONSE [$fieldName=$fieldValue]: $responseData');
+
       if (responseData == null || responseData['STATUS'] != 'OK') {
         return Left(
-          responseData?['MESSAGES']?['error'] ?? 'Unknown error updating server',
+          responseData?['MESSAGES']?['error'] ??
+              'Unknown error updating server',
         );
       }
 
       return const Right(true);
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        return const Left('No internet connection. Please try again.');
+      }
+      return Left('Server error: ${e.response?.statusCode}');
     } catch (e) {
-      debugPrint('UPDATE ERROR: $e');
-      return Left('Network Error: Failed to update task');
+      return Left('Unknown error: $e');
     }
   }
 }

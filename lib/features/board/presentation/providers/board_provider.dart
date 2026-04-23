@@ -9,7 +9,8 @@ class BoardLoading extends BoardState {}
 
 class BoardData extends BoardState {
   final List<TaskModel> tasks;
-  BoardData({required this.tasks});
+  final bool isSaving; // ✅ добавь
+  BoardData({required this.tasks, this.isSaving = false});
 }
 
 class BoardError extends BoardState {
@@ -19,8 +20,8 @@ class BoardError extends BoardState {
 
 class KanbanNotifier extends Notifier<BoardState> {
   late final KanbanRepository _repository;
-
   List<TaskModel> _backupTasks = [];
+  bool _isSaving = false;
 
   @override
   BoardState build() {
@@ -47,69 +48,84 @@ class KanbanNotifier extends Notifier<BoardState> {
     required int newParentId,
     required int newOrder,
   }) async {
-    final currentState = state;
-    if (currentState is! BoardData) return;
+    if (_isSaving) return;
+    _isSaving = true;
 
-    _backupTasks = List.from(currentState.tasks);
-    final newTasks = List<TaskModel>.from(currentState.tasks);
+    final currentTasks = (state as BoardData).tasks;
+    state = BoardData(tasks: currentTasks, isSaving: true);
 
-    final taskIndex = newTasks.indexWhere(
-      (t) => t.indicatorToMoId == task.indicatorToMoId,
-    );
-    if (taskIndex == -1) return;
+    try {
+      final currentState = state;
+      if (currentState is! BoardData) return;
 
-    final oldTask = newTasks[taskIndex];
-    final bool parentChanged = oldTask.parentId != newParentId;
+      _backupTasks = List.from(currentState.tasks);
+      final newTasks = List<TaskModel>.from(currentState.tasks);
 
-    newTasks.removeAt(taskIndex);
-
-    final targetColTasks =
-        newTasks.where((t) => t.parentId == newParentId).toList()
-          ..sort((a, b) => a.order.compareTo(b.order));
-
-    int insertIndex = targetColTasks.indexWhere((t) => t.order >= newOrder);
-    if (insertIndex == -1) insertIndex = targetColTasks.length;
-
-    targetColTasks.insert(insertIndex, oldTask.copyWith(parentId: newParentId));
-
-    for (int i = 0; i < targetColTasks.length; i++) {
-      targetColTasks[i] = targetColTasks[i].copyWith(order: i);
-    }
-
-    newTasks.removeWhere((t) => t.parentId == newParentId);
-    newTasks.addAll(targetColTasks);
-    newTasks.sort((a, b) => a.order.compareTo(b.order));
-
-    state = BoardData(tasks: newTasks);
-
-    final finalUpdatedTask = targetColTasks.firstWhere(
-      (t) => t.indicatorToMoId == task.indicatorToMoId,
-    );
-
-    bool needRevert = false;
-
-    if (parentChanged) {
-      final res = await _repository.updateTaskField(
-        taskId: finalUpdatedTask.indicatorToMoId,
-        fieldName: 'parent_id',
-        fieldValue: newParentId,
+      final taskIndex = newTasks.indexWhere(
+        (t) => t.indicatorToMoId == task.indicatorToMoId,
       );
-      res.mapLeft((_) => needRevert = true);
-    }
+      if (taskIndex == -1) return;
 
-    if (!needRevert) {
-      final res = await _repository.updateTaskField(
-        taskId: finalUpdatedTask.indicatorToMoId,
-        fieldName: 'order',
-        fieldValue: finalUpdatedTask.order,
+      final oldTask = newTasks[taskIndex];
+      final bool parentChanged = oldTask.parentId != newParentId;
+
+      newTasks.removeAt(taskIndex);
+
+      final targetColTasks =
+          newTasks.where((t) => t.parentId == newParentId).toList()
+            ..sort((a, b) => a.order.compareTo(b.order));
+
+      int insertIndex = targetColTasks.indexWhere((t) => t.order >= newOrder);
+      if (insertIndex == -1) insertIndex = targetColTasks.length;
+
+      targetColTasks.insert(
+        insertIndex,
+        oldTask.copyWith(parentId: newParentId),
       );
-      res.mapLeft((_) => needRevert = true);
-    }
 
-    if (needRevert) {
-      state = BoardData(tasks: _backupTasks);
-    } else {
-      _backupTasks = List.from(newTasks);
+      for (int i = 0; i < targetColTasks.length; i++) {
+        targetColTasks[i] = targetColTasks[i].copyWith(order: i);
+      }
+
+      newTasks.removeWhere((t) => t.parentId == newParentId);
+      newTasks.addAll(targetColTasks);
+      newTasks.sort((a, b) => a.order.compareTo(b.order));
+
+      state = BoardData(tasks: newTasks);
+
+      final finalUpdatedTask = targetColTasks.firstWhere(
+        (t) => t.indicatorToMoId == task.indicatorToMoId,
+      );
+
+      bool needRevert = false;
+
+      if (parentChanged) {
+        final res = await _repository.updateTaskField(
+          taskId: finalUpdatedTask.indicatorToMoId,
+          fieldName: 'parent_id',
+          fieldValue: newParentId,
+        );
+        res.mapLeft((_) => needRevert = true);
+      }
+
+      if (!needRevert) {
+        final res = await _repository.updateTaskField(
+          taskId: finalUpdatedTask.indicatorToMoId,
+          fieldName: 'order',
+          fieldValue: finalUpdatedTask.order,
+        );
+        res.mapLeft((_) => needRevert = true);
+      }
+
+      if (needRevert) {
+        state = BoardData(tasks: _backupTasks);
+      } else {
+        _backupTasks = List.from(newTasks);
+      }
+    } finally {
+      _isSaving = false;
+      final currentTasks = (state as BoardData?)?.tasks ?? _backupTasks;
+      state = BoardData(tasks: currentTasks, isSaving: false); //
     }
   }
 }
